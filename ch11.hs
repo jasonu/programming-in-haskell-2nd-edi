@@ -2,8 +2,24 @@ module Main where
 
 import Data.Char
 import Data.List
-import qualified System.IO
+import System.IO
 import AnsiConsole
+import System.Random (randomRIO)
+
+{-
+
+Note: AnsiConsole is just a tiny module I made for the 'cls' and
+'goto' commands used below. These commands were introduced in chapter
+10.
+
+Note: System.Random was not installed on my system, or at least
+neither ghci, nor ghc could find it. I had to install it via the
+following commands:
+
+$ cabal update
+$ cabal install --lib random
+
+-}
 
 ----------------------------------------------------------------------
 --- Tic-Tac-Toe
@@ -126,7 +142,119 @@ run' g p | wins O g  = putStrLn "Player O wins!\n"
 prompt :: Player -> String
 prompt p = "Player " ++ show p ++ ", enter your move: "
 
-main :: IO ()
-main = tictactoe
+-- main :: IO ()
+-- main = tictactoe
 
 --- Game trees
+
+data Tree a = Node a [Tree a]
+  deriving Show
+
+gametree :: Grid -> Player -> Tree Grid
+gametree g p = Node g [gametree g' (next p) | g' <- moves g p]
+
+moves :: Grid -> Player -> [Grid]
+moves g p
+  | won g     = []
+  | full g    = []
+  | otherwise = concat [move g i p | i <- [0..((size^2)-1)]]
+
+--- Pruning the tree
+
+prune :: Int -> Tree a -> Tree a
+prune 0 (Node x _)  = Node x []
+prune n (Node x ts) = Node x [prune (n-1) t | t <- ts]
+
+depth :: Int
+depth = 9
+
+--- Minimax algorithm
+
+minimax :: Tree Grid -> Tree (Grid,Player)
+minimax (Node g [])
+  | wins O g  = Node (g,O) []
+  | wins X g  = Node (g,X) []
+  | otherwise = Node (g,B) []
+minimax (Node g ts)
+  | turn g == O = Node (g, minimum ps) ts'
+  | turn g == X = Node (g, maximum ps) ts'
+  where
+    ts' = map minimax ts
+    ps  = [p | Node (_,p) _ <- ts']
+
+-- bestmove :: Grid -> Player -> Grid
+-- bestmove g p = head [g' | Node (g',p') _ <- ts, p' == best]
+--   where
+--     tree = prune depth (gametree g p)
+--     Node (_,best) ts = minimax tree
+
+--- Human vs computer
+
+main :: IO ()
+main = do hSetBuffering stdout NoBuffering
+          play empty O
+
+-- main :: IO Int
+-- main = do x <- randomRIO (0, 5)
+--           return x
+
+play :: Grid -> Player -> IO ()
+play g p = do cls
+              goto (1,1)
+              putGrid g
+              play' g p
+
+-- play' :: Grid -> Player -> IO ()
+-- play' g p
+--   | wins O g = putStrLn "Player O wins!\n"
+--   | wins X g = putStrLn "Player X wins!\n"
+--   | full g   = putStrLn "It's a draw!\n"
+--   | p == O   = do i <- getNat (prompt p)
+--                   case move g i p of
+--                     [] -> do putStrLn "ERROR: Invalid move"
+--                              play' g p
+--                     [g'] -> play g' (next p)
+--   | p == X   = do putStrLn "Player X is thinking..."
+--                   (play $! (bestmove g p)) (next p)
+
+----------------------------------------------------------------------
+--- Exercises
+----------------------------------------------------------------------
+
+--- 1
+
+gt :: Tree Grid
+gt = gametree empty O
+
+maxTreeDepth :: Tree a -> Int
+maxTreeDepth (Node _ []) = 0
+maxTreeDepth (Node _ ts) = 1 + (foldr max 0 (map maxTreeDepth ts))
+
+countNodes :: Tree a -> Int
+countNodes (Node _ []) = 1
+countNodes (Node _ ts) = 1 + (foldr (+) 0 (map countNodes ts))
+
+--- 2
+
+bestmoves :: Grid -> Player -> [Grid]
+bestmoves g p = [g' | Node (g',p') _ <- ts, p' == best]
+  where
+    tree = prune depth (gametree g p)
+    Node (_,best) ts = minimax tree
+
+
+
+play' :: Grid -> Player -> IO ()
+play' g p
+  | wins O g = putStrLn "Player O wins!\n"
+  | wins X g = putStrLn "Player X wins!\n"
+  | full g   = putStrLn "It's a draw!\n"
+  | p == O   = do i <- getNat (prompt p)
+                  case move g i p of
+                    [] -> do putStrLn "ERROR: Invalid move"
+                             play' g p
+                    [g'] -> play g' (next p)
+  | p == X   = do putStrLn "Player X is thinking..."
+                  let gs = bestmoves g p
+                  x <- randomRIO (0, (length gs) - 1)
+                  play (gs !! x) (next p)
